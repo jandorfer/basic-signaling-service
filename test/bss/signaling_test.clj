@@ -8,19 +8,20 @@
   (let [client-send (a/chan)
         client-recv (a/chan)
         client (bidi-ch client-send client-recv)
-        cnt (count @s/clients)]
+        events (a/chan)]
+
+    (s/on :connect events)
+    (s/on :disconnect events)
 
     (fact "connection works"
       (s/handle-client client)
-      (count @s/clients) => (+ 1 cnt))
+      (a/<!! events) => {:event :connect :client client})
 
     (fact "basic pub-sub for topic"
       (a/>!! client-send {:type :sub :topic "test"})
-      (a/>!! client-send {:type :pub :topic "test" :message "howdy"})
-      (a/<!! client-recv) => "howdy")
+      (a/>!! client-send {:type :pub :topic "test" :message {:data "qwerty"}})
+      (:data (a/<!! client-recv)) => "qwerty")
 
     (fact "closing connection disconnects client"
       (a/close! client)
-      (a/<!! client-recv) => nil
-      (a/<!! client-send) => nil
-      (count @s/clients) => cnt)))
+      (a/<!! events) => {:event :disconnect :client client})))

@@ -8,12 +8,24 @@
 (def clients (atom {}))
 
 ; The publishing system for message exchange
-(def publisher (a/chan))
-(def general-messages (a/pub publisher #(:topic %)))
+(def msg-publisher (a/chan))
+(def general-messages (a/pub msg-publisher #(:topic %)))
+
+; General events (connect/disconnect)
+(def event-publisher (a/chan))
+(def events (a/pub event-publisher #(:event %)))
+
+(defn trigger-event!
+  [event]
+  (go (a/>! event-publisher event)))
+
+(defn on
+  [event-id handler-chan]
+  (a/sub events event-id handler-chan))
 
 (defn publish!
   [topic message]
-  (go (a/>! general-messages
+  (go (a/>! msg-publisher
             (merge message {:topic topic}))))
 
 (defn subscribe!
@@ -35,14 +47,16 @@
 
 (defn- handle-connect!
   [client]
-  (swap! clients assoc client #{}))
+  (swap! clients assoc client #{})
+  (trigger-event! {:event :connect :client client}))
 
 (defn- handle-disconnect!
   [client]
-  (let [subs (get-in @clients client)]
+  (let [subs (get @clients client)]
     (swap! clients dissoc client)
     (doseq [sub subs]
-      (unsubscribe! sub client))))
+      (unsubscribe! sub client))
+    (trigger-event! {:event :disconnect :client client})))
 
 (defn handle-client
   "Handles a given bidirectional channel as a client to the signaling server.
