@@ -9,11 +9,11 @@
 
 ; The publishing system for message exchange
 (def msg-publisher (a/chan))
-(def general-messages (a/pub msg-publisher #(:topic %)))
+(def general-messages (a/pub msg-publisher :topic (fn [_] (a/sliding-buffer 1))))
 
 ; General events (connect/disconnect)
 (def event-publisher (a/chan))
-(def events (a/pub event-publisher #(:event %)))
+(def events (a/pub event-publisher :event (fn [_] (a/sliding-buffer 1))))
 
 (defn trigger-event!
   [event]
@@ -53,9 +53,9 @@
 (defn- handle-disconnect!
   [client]
   (let [subs (get @clients client)]
-    (swap! clients dissoc client)
     (doseq [sub subs]
       (unsubscribe! sub client))
+    (swap! clients dissoc client)
     (trigger-event! {:event :disconnect :client client})))
 
 (defn handle-client
