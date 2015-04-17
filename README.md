@@ -5,6 +5,8 @@ over web sockets, to facilitate RTCPeerConnection. Really it exposes a
 generic pub-sub messaging system via core.async channels, then optionally
 pulls in the chord library to attach that to a web socket implementation.
 
+[Demo](https://github.com/jandorfer/basic-signaling-service-demo)
+
 ## Usage
 
 To attach to web server (http-kit):
