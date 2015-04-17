@@ -30,6 +30,31 @@
          ~'r (a/alts!! [~chan ~'t])]
      (if (= ~'t (second ~'r)) :timeout (first ~'r))))
 
+(background
+  ;; flush event queue before each check
+  (before :facts (while (not (= (<!!-t events :timeout 250) :timeout)))))
+
+(facts "chord parsing check"
+  (fact "valid message"
+    (s/parse-chord-message {:message {"type" "sub" "topic" "abd def"}})
+         => {:type :sub :topic "abd def"})
+  (fact "malformed message"
+    (s/parse-chord-message {:message {"random" "data"}})
+         => {:type :unspecified :random "data"})
+  (fact "nil message"
+    (s/parse-chord-message {:message nil})
+         => {:type :unspecified})
+  (fact "nil everything"
+    (s/parse-chord-message nil)
+         => {:type :unspecified}))
+
+(facts "custom read-fn is applied"
+  (let [{client :bidi, :keys [send receive]} (create-client)]
+    (s/handle-client client :read-fn :wrapper)
+    (a/>!! send {:wrapper {:type :pub :topic "" :message {:data "howdy"}}})
+    (:data (<!!-t receive)) => "howdy"
+    (a/close! client)))
+
 (facts "single client connection"
   (let [{client :bidi, :keys [send receive]} (create-client)]
 
@@ -42,6 +67,22 @@
       (a/>!! send {:type :sub :topic "test"})
       (a/>!! send {:type :pub :topic "test" :message {:data "qwerty"}})
       (:data (<!!-t receive)) => "qwerty")
+
+    (fact "default channel is also available"
+      (a/>!! send {:type :pub :topic "" :message {:data "howdy"}})
+      (:data (<!!-t receive)) => "howdy")
+
+    (fact "shorthand message sending"
+      (a/>!! send {:type :pub :topic "" :message "not in a map!"})
+      (:data (<!!-t receive)) => "not in a map!")
+
+    (fact "everybody makes mistakes (bad message format)"
+      (a/>!! send {:oops "my message!"})
+      (<!!-t receive) => {:error "Unrecognized message" :msg {:oops "my message!"}})
+
+    (fact "unsubscribing is polite (and should stop the flow of messages)"
+      (a/>!! send {:type :unsub :topic "test"})
+      (<!!-t receive) => :timeout)
 
     (fact "closing connection disconnects client"
       (a/close! client)
@@ -109,10 +150,10 @@
         (<!!-t (:receive s)) => {:data "ping" :topic "test"}))
 
     ;; Clean up
-    (while (not (= (<!!-t events) :timeout))) ;; flush event queue
-    (doseq [{s :bidi} subscribed]
-      (a/close! s)
-      ;; event order not gauranteed;
-      ;; check that any disconnect happened, will ensure we get 100
-      (:event (<!!-t events)) => :disconnect)
-    (count @s/clients) => 0))
+    (fact "everything cleans up ok"
+      (doseq [{s :bidi} subscribed]
+        (a/close! s)
+        ;; event order not gauranteed;
+        ;; check that any disconnect happened, will ensure we get 100
+        (:event (<!!-t events)) => :disconnect)
+      (count @s/clients) => 0)))

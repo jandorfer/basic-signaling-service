@@ -25,8 +25,9 @@
 
 (defn publish!
   [topic message]
-  (go (a/>! msg-publisher
-            (merge message {:topic topic}))))
+  (let [message (if (map? message) message {:data message})]
+    (go (a/>! msg-publisher
+              (merge message {:topic topic})))))
 
 (defn subscribe!
   [topic subscriber]
@@ -43,12 +44,15 @@
     (case type
       :pub (publish! topic message)
       :sub (subscribe! topic client)
-      :unsub (unsubscribe! topic client))))
+      :unsub (unsubscribe! topic client)
+      (do (log/warn "failed to parse message" msg)
+          (go (a/>! client {:error "Unrecognized message" :msg msg}))))))
 
 (defn- handle-connect!
   [client]
   (swap! clients assoc client #{})
-  (trigger-event! {:event :connect :client client}))
+  (trigger-event! {:event :connect :client client})
+  (subscribe! "" client))
 
 (defn- handle-disconnect!
   [client]
@@ -63,14 +67,24 @@
   The channel will be recorded as connected and so receive messages from other
   clients as appropriate. Any messages received from this client will be parsed
   and acted on."
-  [client]
+  [client & {:keys [read-fn]}]
   (handle-connect! client)
   (go-loop []
     ;; read from the new channel until 'nil' (close)
     (let [message (<! client)]
       (if message
-        (do (process-message client message) (recur))
+        (do (process-message client ((or read-fn identity) message)) (recur))
         (handle-disconnect! client)))))
+
+(defn parse-chord-message
+  "The chord library serialization wraps all data in a :message key, which we
+  need to unwrap. It also will use strings as keys in the map, which for
+  convenience we'll parse to keywords."
+  [msg]
+  (-> msg
+      :message
+      clojure.walk/keywordize-keys
+      (update-in [:type] #(keyword (or % "unspecified")))))
 
 (defn signaling-channel
   "Ring-compatible requent handling method which defines a web socket service.
@@ -78,4 +92,4 @@
   clients and exchanging events between them."
   [request]
   (with-channel request client-channel {:format :json}
-    (handle-client client-channel)))
+    (handle-client client-channel :read-fn parse-chord-message)))
